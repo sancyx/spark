@@ -1,0 +1,72 @@
+cluster:
+  action: GetCluster
+  cloud: amazon
+  name: xlbf9igklanjy
+pipeline:
+  package_application:
+    image: lachlanevenson/k8s-helm:v2.16.1
+    commands:
+    - helm init -c
+    - helm repo add banzaicloud-stable https://kubernetes-charts.banzaicloud.com
+    - helm package -u ./.banzaicloud/charts/spotguide-spark
+  deploy_application:
+    action: EnsureDeployment
+    deployment:
+      name: ./spotguide-spark-1.0.0.tgz
+      namespace: spark
+      releaseName: '{{ .CICD_REPO_NAME }}'
+      values:
+        banzaicloud:
+          bucket:
+            location: null
+            namespace: null
+            storageAccountName: null
+          interpreter: Scala
+          security:
+            enabled: true
+          spark:
+            executor:
+              num: "2"
+            image:
+              tag: v2.4.3.211
+            version: 2.4.3
+        historyServer:
+          enabled: false
+        spark:
+          monitoring:
+            enabled: true
+            jmxCollector: |
+              lowercaseOutputName: false
+              lowercaseOutputLabelNames: false
+              whitelistObjectNames: ["*:*"]
+            metricsProperties: |
+              # Enable Prometheus for all instances by class name
+              *.sink.prometheus.class=com.banzaicloud.spark.metrics.sink.PrometheusSink
+              # Prometheus pushgateway address
+              *.sink.prometheus.pushgateway-address=monitor-prometheus-operato-prometheus.pipeline-system.svc:9090
+              *.sink.prometheus.pushgateway-enable-timestamp=true
+              *.sink.prometheus.enable-dropwizard-collector=true
+              *.sink.prometheus.enable-jmx-collector=false
+          spark-hs:
+            image:
+              tag: v2.4.3.211
+            ingress:
+              annotations:
+                ingress.kubernetes.io/ssl-redirect: "true"
+                kubernetes.io/ingress.class: traefik
+                traefik.frontend.rule.type: PathPrefixStrip
+                traefik.ingress.kubernetes.io/auth-secret: '{{ .CICD_REPO_NAME }}-hs-auth'
+                traefik.ingress.kubernetes.io/auth-type: basic
+              enabled: true
+              hosts:
+              - shs-{{ (printf "%s-%s" .CICD_REPO_NAME .CLUSTER_NAME) | sha1sum | trunc 10}}.{{.ORG_NAME | lower}}.{{.DOMAIN_NAME}}
+            sparkEventLogStorage:
+              aliOssRegion: null
+              azureStorageAccountName: null
+              cloudProvider: null
+              logDirectory: null
+              oracleNamespace: null
+              oracleRegion: null
+              pipelineSecretName: null
+              secretName: '{{ .CICD_REPO_NAME }}-hs-bucket'
+    image: banzaicloud/ci-pipeline-client:0.12
